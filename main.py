@@ -9,6 +9,7 @@ import random
 import os
 
 PROFILES = [
+    "omerutkuDemir"
     "bpthaber",
     "2_sayfaofficial",
     "Reuters",
