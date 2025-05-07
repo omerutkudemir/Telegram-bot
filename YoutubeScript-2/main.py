@@ -1,9 +1,12 @@
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
 from bs4 import BeautifulSoup
 import requests
 import time
 import random
+import os
 
 PROFILES = [
     "bpthaber",
@@ -14,12 +17,11 @@ PROFILES = [
     "buzzspor",
     "sporarena",
     "demarkesports",
-    "F1tutkumuz",
-    "EnskcSec"
+    "F1tutkumuz"
 ]
 
 BASE_URL = "https://nitter.net"
-TELEGRAM_BOT_TOKEN = "7456125265:AAHRuoYPWjshQb-R36MVpYL0n3CNesmM-eI"
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "7456125265:AAHRuoYPWjshQb-R36MVpYL0n3CNesmM-eI")
 TELEGRAM_CHAT_ID = "-1002517689872"
 CHECK_INTERVAL = 300  # 5 dakika
 REQUEST_DELAY = 5  # Her profil arasında 5 saniye gecikme
@@ -37,13 +39,16 @@ def send_telegram_message(text):
 
 def setup_driver():
     options = Options()
-    options.headless = True  # Tarayıcıyı görünmez yap
+    options.headless = True
     options.add_argument("--disable-gpu")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument(
         "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
-    driver = webdriver.Chrome(options=options)
+    options.add_argument("--disable-extensions")
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    service = Service(ChromeDriverManager().install())
+    driver = webdriver.Chrome(service=service, options=options)
     return driver
 
 
@@ -62,7 +67,7 @@ def check_profiles():
                 tweets = soup.find_all("div", class_="tweet-content")
                 tweet_links = soup.find_all("a", class_="tweet-link")
 
-                for tweet, link in zip(tweets[:5], tweet_links[:1]):  # Son 5 tweet'i kontrol et
+                for tweet, link in zip(tweets[:5], tweet_links[:5]):  # Son 5 tweet'i kontrol et
                     tweet_text = tweet.get_text().strip()
                     tweet_url = BASE_URL + link['href']
                     if tweet_url not in last_seen_tweets[profile]:
