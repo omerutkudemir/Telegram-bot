@@ -41,17 +41,16 @@ def send_telegram_message(text):
 
 def setup_driver():
     options = Options()
-    options.headless = True
-    options.add_argument("--disable-gpu")
+    options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    options.add_argument(
-        "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
-    options.add_argument("--disable-extensions")
-    options.add_argument("--disable-blink-features=AutomationControlled")
-    # Chrome binary yolunu belirt
-    options.binary_location = "/usr/bin/google-chrome"
-    service = Service(ChromeDriverManager().install())
+    options.add_argument("--disable-gpu")
+    
+    # Render için doğru binary yolları
+    options.binary_location = "/usr/bin/chromium-browser"
+    
+    # ChromeDriver'ı doğrudan belirtin
+    service = Service(executable_path="/usr/bin/chromedriver")
     driver = webdriver.Chrome(service=service, options=options)
     return driver
 
