@@ -1,1 +1,1 @@
-worker: python telegram_twitter_scraper.py
+worker: python main.py
