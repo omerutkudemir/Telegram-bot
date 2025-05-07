@@ -23,8 +23,9 @@ PROFILES = [
 BASE_URL = "https://nitter.net"
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "7456125265:AAHRuoYPWjshQb-R36MVpYL0n3CNesmM-eI")
 TELEGRAM_CHAT_ID = "-1002517689872"
-CHECK_INTERVAL = 300  # 5 dakika
+CHECK_INTERVAL = 600  # 10 dakika
 REQUEST_DELAY = 5  # Her profil arasında 5 saniye gecikme
+RETRY_WAIT = 60  # 429 hatasında 60 saniye bekle
 
 last_seen_tweets = {profile: set() for profile in PROFILES}
 
@@ -35,6 +36,7 @@ def send_telegram_message(text):
     response = requests.post(url, data=data)
     if not response.ok:
         print(f"[HATA] Telegram mesajı gönderilemedi: {response.status_code} - {response.text}")
+    time.sleep(1)
 
 
 def setup_driver():
@@ -47,6 +49,8 @@ def setup_driver():
         "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
     options.add_argument("--disable-extensions")
     options.add_argument("--disable-blink-features=AutomationControlled")
+    # Chrome binary yolunu belirt
+    options.binary_location = "/usr/bin/google-chrome"
     service = Service(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=options)
     return driver
@@ -56,31 +60,34 @@ def check_profiles():
     driver = setup_driver()
     try:
         for profile in PROFILES:
-            try:
-                url = f"{BASE_URL}/{profile}"
-                print(f"[DEBUG] {url} kontrol ediliyor...")
-                driver.get(url)
-                time.sleep(3)  # Sayfanın yüklenmesini bekle
-                soup = BeautifulSoup(driver.page_source, 'html.parser')
-
-                # Tweet'leri bul
-                tweets = soup.find_all("div", class_="tweet-content")
-                tweet_links = soup.find_all("a", class_="tweet-link")
-
-                for tweet, link in zip(tweets[:5], tweet_links[:5]):  # Son 5 tweet'i kontrol et
-                    tweet_text = tweet.get_text().strip()
-                    tweet_url = BASE_URL + link['href']
-                    if tweet_url not in last_seen_tweets[profile]:
-                        last_seen_tweets[profile].add(tweet_url)
-                        message = f"🕊️ Yeni Tweet ({profile}): <b>{tweet_text}</b>\n\n{tweet_url}"
-                        send_telegram_message(message)
-                        print(f"[BAŞARILI] {profile} için tweet gönderildi: {tweet_text[:50]}...")
-
-            except Exception as e:
-                print(f"[HATA] {profile} kontrol edilirken hata: {e}")
-
-            time.sleep(REQUEST_DELAY + random.uniform(0, 2))  # Rastgele gecikme
-
+            retries = 3
+            for attempt in range(retries):
+                try:
+                    url = f"{BASE_URL}/{profile}"
+                    print(f"[DEBUG] {url} kontrol ediliyor...")
+                    driver.get(url)
+                    time.sleep(3)
+                    soup = BeautifulSoup(driver.page_source, 'html.parser')
+                    tweets = soup.find_all("div", class_="tweet-content")
+                    tweet_links = soup.find_all("a", class_="tweet-link")
+                    for tweet, link in zip(tweets[:5], tweet_links[:5]):
+                        tweet_text = tweet.get_text().strip()
+                        tweet_url = BASE_URL + link['href']
+                        if tweet_url not in last_seen_tweets[profile]:
+                            last_seen_tweets[profile].add(tweet_url)
+                            message = f"🕊️ Yeni Tweet ({profile}): <b>{tweet_text}</b>\n\n{tweet_url}"
+                            send_telegram_message(message)
+                            print(f"[BAŞARILI] {profile} için tweet gönderildi: {tweet_text[:50]}...")
+                    break
+                except Exception as e:
+                    if "429" in str(e) or "Too Many Requests" in str(e):
+                        print(
+                            f"[HATA] {profile} için 429 Too Many Requests, {attempt + 1}/{retries} deneme, {RETRY_WAIT} saniye bekleniyor...")
+                        time.sleep(RETRY_WAIT + random.uniform(0, 5))
+                    else:
+                        print(f"[HATA] {profile} kontrol edilirken hata: {e}")
+                        break
+            time.sleep(REQUEST_DELAY + random.uniform(0, 2))
     finally:
         driver.quit()
 
