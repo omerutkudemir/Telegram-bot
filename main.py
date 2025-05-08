@@ -30,27 +30,29 @@ CHECK_INTERVAL = 600  # 10 dakika
 REQUEST_DELAY = 20    # Her profil arasında bekleme
 
 def setup_driver():
-    """Chrome driver kurulumu"""
     options = Options()
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--disable-gpu")
-    options.add_argument("--window-size=1920x1080")
-    options.binary_location = "/usr/bin/google-chrome"
     
+    # Chrome binary kontrolü
+    chrome_path = "/usr/bin/google-chrome"
+    if not os.path.exists(chrome_path):
+        raise FileNotFoundError(f"Chrome binary bulunamadı: {chrome_path}")
+    
+    options.binary_location = chrome_path
+    
+    # ChromeDriver kontrolü
+    chromedriver_path = "/usr/bin/chromedriver"
+    if not os.path.exists(chromedriver_path):
+        raise FileNotFoundError(f"ChromeDriver bulunamadı: {chromedriver_path}")
+
     service = Service(
-        executable_path="/usr/bin/chromedriver",
-        service_args=["--verbose", "--log-path=chromedriver.log"]
+        executable_path=chromedriver_path,
+        service_args=["--verbose"]
     )
     
-    try:
-        driver = webdriver.Chrome(service=service, options=options)
-        driver.set_page_load_timeout(30)
-        return driver
-    except Exception as e:
-        logger.error(f"Driver başlatma hatası: {str(e)}")
-        raise
+    return webdriver.Chrome(service=service, options=options)
 
 def send_telegram_message(text):
     """Telegram'a mesaj gönder"""
