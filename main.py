@@ -88,8 +88,8 @@ def scrape_profile(driver, profile):
         driver.get(url)
         
         # Sayfanın yüklenmesini bekle
-        WebDriverWait(driver, 15).until(
-            EC.presence_of_element_located((By.CLASS_NAME, "tweet-content"))
+       WebDriverWait(driver, 15).until(
+    EC.presence_of_element_located((By.CLASS_NAME, "tweet-content")))
         
         # Sayfa kaynağını parse et
         soup = BeautifulSoup(driver.page_source, 'html.parser')
