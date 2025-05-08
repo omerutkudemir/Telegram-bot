@@ -1,171 +1,123 @@
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
 from bs4 import BeautifulSoup
 import requests
 import time
-import random
 import os
-from flask import Flask
-import threading
 import logging
-from urllib3.util.retry import Retry
-from requests.adapters import HTTPAdapter
-
-app = Flask(__name__)
-
-# Yapılandırma
-PROFILES = [
-    "bpthaber",
-    "Reuters",
-    "trtspor",
-    "sporarena"
-]
-
-# Farklı Nitter örnekleri (instances)
-NITTER_INSTANCES = [
-    "https://nitter.net",
-    "https://nitter.42l.fr",
-    "https://nitter.poast.org",
-    "https://nitter.nixnet.services"
-]
-
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-CHECK_INTERVAL = 600  # 10 dakika
-MIN_DELAY = 20  # Minimum bekleme süresi (saniye)
-MAX_DELAY = 40  # Maksimum bekleme süresi (saniye)
-
-last_seen_tweets = {profile: set() for profile in PROFILES}
+import subprocess
 
 # Log ayarları
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Oturum ayarı
-session = requests.Session()
-retry_strategy = Retry(
-    total=3,
-    backoff_factor=1,
-    status_forcelist=[429, 500, 502, 503, 504]
-)
-adapter = HTTPAdapter(max_retries=retry_strategy)
-session.mount("https://", adapter)
-session.mount("http://", adapter)
+# Config
+PROFILES = ["bpthaber", "Reuters", "trtspor"]  # Test için 3 profil
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+CHECK_INTERVAL = 600  # 10 dakika
+REQUEST_DELAY = 15  # Her istek arasında 15 saniye
 
-def get_random_headers():
-    """Rastgele gerçekçi tarayıcı başlıkları oluştur"""
-    user_agents = [
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0.3 Safari/605.1.15",
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36"
-    ]
-    return {
-        "User-Agent": random.choice(user_agents),
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.5",
-        "Referer": "https://www.google.com/",
-        "DNT": str(random.randint(0, 1)),
-        "Connection": "keep-alive"
-    }
+def setup_chrome():
+    """Render için Chrome kurulumu"""
+    try:
+        # Chrome kurulu mu kontrol et
+        chrome_installed = subprocess.run(["which", "google-chrome"], capture_output=True).returncode == 0
+        if not chrome_installed:
+            logger.info("Chrome kuruluyor...")
+            subprocess.run([
+                "apt-get", "update",
+                "&&", "apt-get", "install", "-y", "wget",
+                "&&", "wget", "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb",
+                "&&", "dpkg", "-i", "google-chrome-stable_current_amd64.deb",
+                "||", "apt-get", "install", "-f", "-y"
+            ], check=True)
+        return True
+    except Exception as e:
+        logger.error(f"Chrome kurulum hatası: {str(e)}")
+        return False
+
+def get_driver():
+    """Chrome driver ayarları"""
+    options = Options()
+    options.add_argument("--headless=new")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")
+    options.binary_location = "/usr/bin/google-chrome"  # Render için sabit yol
+
+    try:
+        service = Service(ChromeDriverManager().install())
+        driver = webdriver.Chrome(service=service, options=options)
+        return driver
+    except Exception as e:
+        logger.error(f"Driver hatası: {str(e)}")
+        raise
 
 def send_telegram_message(text):
-    """Telegram'a mesaj gönder"""
+    """Telegram mesaj gönderimi"""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         logger.error("Telegram bilgileri eksik!")
         return False
         
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    data = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": text,
-        "parse_mode": "HTML"
-    }
+    data = {"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "HTML"}
     try:
-        response = session.post(url, data=data, timeout=15)
+        response = requests.post(url, data=data, timeout=10)
         if response.status_code == 200:
             return True
-        logger.error(f"Telegram hatası: {response.status_code} - {response.text}")
+        logger.error(f"Telegram hatası: {response.status_code}")
     except Exception as e:
-        logger.error(f"Telegram gönderim hatası: {str(e)}")
+        logger.error(f"Telegram bağlantı hatası: {str(e)}")
     return False
 
-def fetch_profile(profile):
-    """Nitter'dan profil verilerini getir"""
-    instance = random.choice(NITTER_INSTANCES)
-    url = f"{instance}/{profile}"
-    try:
-        response = session.get(
-            url,
-            headers=get_random_headers(),
-            timeout=20,
-            allow_redirects=True
-        )
-        response.raise_for_status()
-        return response.text
-    except requests.exceptions.RequestException as e:
-        logger.warning(f"{instance} {profile} için başarısız: {str(e)}")
-        return None
-
-def process_profile(profile):
-    """Bir profil için tweetleri işle"""
-    html = fetch_profile(profile)
-    if not html:
-        return
-        
-    soup = BeautifulSoup(html, 'html.parser')
-    tweets = soup.find_all("div", class_="tweet-content")
-    tweet_links = soup.find_all("a", class_="tweet-link")
-    
-    if not tweets:
-        logger.info(f"{profile} için tweet bulunamadı")
-        return
-        
-    for tweet, link in zip(tweets[:3], tweet_links[:3]):
-        tweet_text = tweet.get_text().strip()
-        tweet_url = link['href'] if link['href'].startswith('http') else f"https://nitter.net{link['href']}"
-        
-        if tweet_url not in last_seen_tweets[profile]:
-            last_seen_tweets[profile].add(tweet_url)
-            message = f"🕊️ Yeni Tweet ({profile}):\n<b>{tweet_text}</b>\n\n🔗 {tweet_url}"
-            if send_telegram_message(message):
-                logger.info(f"Gönderildi: {profile} - {tweet_text[:50]}...")
-            else:
-                logger.error(f"Gönderilemedi: {profile}")
-
 def check_profiles():
-    """Tüm profilleri kontrol et"""
-    logger.info("Profil kontrolü başladı")
-    for profile in PROFILES:
-        process_profile(profile)
-        delay = random.uniform(MIN_DELAY, MAX_DELAY)
-        logger.info(f"{delay:.1f} saniye bekleniyor...")
-        time.sleep(delay)
-    logger.info("Profil kontrolü tamamlandı")
+    """Profil kontrollerini yürüt"""
+    if not setup_chrome():
+        logger.error("Chrome kurulumu başarısız!")
+        return
 
-@app.route('/')
-def health_check():
-    return "🤖 Twitter Bot Aktif", 200
-
-@app.route('/test')
-def test_message():
-    """Test endpointi"""
-    if send_telegram_message("🔍 Bot çalışıyor ve test mesajı gönderiyor!"):
-        return "Test mesajı başarıyla gönderildi", 200
-    return "Test mesajı gönderilemedi", 500
-
-def run_bot():
-    """Botu arka planda çalıştır"""
-    logger.info("🤖 Bot başlatıldı")
-    while True:
-        check_profiles()
-        logger.info(f"{CHECK_INTERVAL} saniye bekleniyor...")
-        time.sleep(CHECK_INTERVAL)
+    driver = None
+    try:
+        driver = get_driver()
+        for profile in PROFILES:
+            try:
+                url = f"https://nitter.net/{profile}"
+                logger.info(f"{profile} kontrol ediliyor...")
+                
+                driver.get(url)
+                time.sleep(3)
+                
+                soup = BeautifulSoup(driver.page_source, 'html.parser')
+                tweets = soup.find_all("div", class_="tweet-content")
+                
+                if tweets:
+                    tweet_text = tweets[0].get_text().strip()
+                    message = f"🕊️ Yeni Tweet ({profile}):\n<b>{tweet_text}</b>"
+                    if send_telegram_message(message):
+                        logger.info(f"Gönderildi: {profile}")
+                
+                time.sleep(REQUEST_DELAY)
+                
+            except Exception as e:
+                logger.error(f"{profile} hatası: {str(e)}")
+                time.sleep(30)  # Hata durumunda 30 saniye bekle
+                
+    except Exception as e:
+        logger.critical(f"Kritik hata: {str(e)}")
+    finally:
+        if driver:
+            driver.quit()
 
 if __name__ == "__main__":
-    # Başlangıç testi
-    send_telegram_message("🚀 Twitter Bot başlatıldı")
-    
-    # Bot thread'i
-    bot_thread = threading.Thread(target=run_bot, daemon=True)
-    bot_thread.start()
-    
-    # Flask uygulaması
-    app.run(host='0.0.0.0', port=8080)
+    # Başlangıç kontrolü
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        logger.error("Lütfen Render'da TELEGRAM_BOT_TOKEN ve TELEGRAM_CHAT_ID ayarlayın!")
+    else:
+        logger.info("Bot başlatılıyor...")
+        send_telegram_message("🤖 Bot başlatıldı")
+        while True:
+            check_profiles()
+            time.sleep(CHECK_INTERVAL)
