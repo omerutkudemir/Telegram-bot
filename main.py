@@ -34,25 +34,80 @@ def setup_driver():
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    
-    # Chrome binary kontrolü
-    chrome_path = "/usr/bin/google-chrome"
-    if not os.path.exists(chrome_path):
-        raise FileNotFoundError(f"Chrome binary bulunamadı: {chrome_path}")
-    
-    options.binary_location = chrome_path
-    
-    # ChromeDriver kontrolü
-    chromedriver_path = "/usr/bin/chromedriver"
-    if not os.path.exists(chromedriver_path):
-        raise FileNotFoundError(f"ChromeDriver bulunamadı: {chromedriver_path}")
+    options.add_argument("--disable-gpu")  # Özellikle headless modda bazı ortamlarda yardımcı olabilir
+    options.add_argument("--window-size=1920,1080") # Headless için bazen gerekebilir
 
+    # Chrome binary'sini bul
+    chrome_binary_path = shutil.which("google-chrome")
+    if not chrome_binary_path:
+        # Alternatif olarak 'google-chrome-stable' adıyla da PATH'te olabilir
+        chrome_binary_path = shutil.which("google-chrome-stable")
+    
+    # PATH'te bulunamazsa, bilinen yaygın yolları kontrol et
+    if not chrome_binary_path:
+        common_paths = [
+            "/usr/bin/google-chrome",
+            "/usr/bin/google-chrome-stable",
+            "/opt/google/chrome/chrome" # Bazen buraya da kurulabilir
+        ]
+        for path_option in common_paths:
+            if os.path.exists(path_option):
+                chrome_binary_path = path_option
+                logger.info(f"Chrome binary manuel olarak şu yolda bulundu: {chrome_binary_path}")
+                break
+    
+    if not chrome_binary_path or not os.path.exists(chrome_binary_path):
+        error_msg = (
+            "Chrome binary PATH üzerinde veya bilinen yaygın yollarda bulunamadı. "
+            f"shutil.which('google-chrome') sonucu: {shutil.which('google-chrome')}, "
+            f"shutil.which('google-chrome-stable') sonucu: {shutil.which('google-chrome-stable')}."
+        )
+        logger.critical(error_msg)
+        raise FileNotFoundError(error_msg)
+    
+    logger.info(f"Kullanılacak Chrome binary: {chrome_binary_path}")
+    options.binary_location = chrome_binary_path
+    
+    # ChromeDriver'ı bul
+    chromedriver_exe_path = shutil.which("chromedriver")
+    
+    if not chromedriver_exe_path:
+        common_cd_paths = [
+            "/usr/bin/chromedriver",
+            "/usr/local/bin/chromedriver" # ChromeDriver bazen buraya da kurulabilir
+        ]
+        for cd_path_option in common_cd_paths:
+            if os.path.exists(cd_path_option):
+                chromedriver_exe_path = cd_path_option
+                logger.info(f"ChromeDriver manuel olarak şu yolda bulundu: {chromedriver_exe_path}")
+                break
+
+    if not chromedriver_exe_path or not os.path.exists(chromedriver_exe_path):
+        error_msg_cd = (
+            "ChromeDriver PATH üzerinde veya bilinen yaygın yollarda bulunamadı. "
+            f"shutil.which('chromedriver') sonucu: {shutil.which('chromedriver')}."
+        )
+        logger.critical(error_msg_cd)
+        raise FileNotFoundError(error_msg_cd)
+
+    logger.info(f"Kullanılacak ChromeDriver: {chromedriver_exe_path}")
+    
+    # ChromeDriver loglamasını etkinleştirmek (sorun giderme için faydalı olabilir)
+    service_args = ["--verbose", "--log-path=/tmp/chromedriver.log"]
     service = Service(
-        executable_path=chromedriver_path,
-        service_args=["--verbose"]
+        executable_path=chromedriver_exe_path,
+        service_args=service_args
     )
     
-    return webdriver.Chrome(service=service, options=options)
+    logger.info("WebDriver (Chrome) başlatılıyor...")
+    try:
+        driver = webdriver.Chrome(service=service, options=options)
+        logger.info("WebDriver (Chrome) başarıyla başlatıldı.")
+        return driver
+    except Exception as e:
+        logger.critical(f"WebDriver (Chrome) başlatılırken kritik bir hata oluştu: {str(e)}")
+        # /tmp/chromedriver.log dosyasını kontrol edin (eğer imaj içinde erişiminiz varsa)
+        raise
 
 def send_telegram_message(text):
     """Telegram'a mesaj gönder"""
