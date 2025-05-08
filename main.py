@@ -14,6 +14,7 @@ app = Flask(__name__)
 
 # Config
 PROFILES = [
+    "omerutkuDemir"
     "bpthaber",
     "2_sayfaofficial",
     "Reuters",
