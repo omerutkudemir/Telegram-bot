@@ -22,28 +22,23 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Config
-PROFILES = ["bpthaber", "Reuters", "trtspor"]  # İzlenecek hesaplar
+PROFILES = ["bpthaber", "Reuters", "trtspor"]
 BASE_URL = "https://nitter.net"
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-CHECK_INTERVAL = 600  # 10 dakika (saniye)
-REQUEST_DELAY = 20  # Her profil arasında bekleme süresi
+CHECK_INTERVAL = 600  # 10 dakika
+REQUEST_DELAY = 20    # Her profil arasında bekleme
 
 def setup_driver():
     """Chrome driver kurulumu"""
     options = Options()
-    
-    # Render optimizasyonları
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
     options.add_argument("--window-size=1920x1080")
-    
-    # Chrome binary yolu (Dockerfile ile kuruldu)
     options.binary_location = "/usr/bin/google-chrome"
     
-    # ChromeDriver ayarları
     service = Service(
         executable_path="/usr/bin/chromedriver",
         service_args=["--verbose", "--log-path=chromedriver.log"]
@@ -80,36 +75,30 @@ def send_telegram_message(text):
     return False
 
 def scrape_profile(driver, profile):
-    """Tek bir profil için tweetleri çek"""
+    """Profil tweetlerini çek"""
     try:
         url = f"{BASE_URL}/{profile}"
         logger.info(f"{profile} için veri çekiliyor: {url}")
         
         driver.get(url)
         
-        # Sayfanın yüklenmesini bekle
-       WebDriverWait(driver, 15).until(
-    EC.presence_of_element_located((By.CLASS_NAME, "tweet-content")))
+        # DÜZELTİLMİŞ KISIM (Parantez hatası giderildi)
+        WebDriverWait(driver, 15).until(
+            EC.presence_of_element_located((By.CLASS_NAME, "tweet-content"))
+        )
         
-        # Sayfa kaynağını parse et
         soup = BeautifulSoup(driver.page_source, 'html.parser')
         tweets = soup.find_all("div", class_="tweet-content", limit=3)
         
-        if not tweets:
-            logger.warning(f"{profile} için tweet bulunamadı")
-            return []
-            
-        return [tweet.get_text().strip() for tweet in tweets]
+        return [tweet.get_text().strip() for tweet in tweets] if tweets else []
         
     except Exception as e:
         logger.error(f"{profile} çekme hatası: {str(e)}")
         return []
 
 def main():
-    """Ana işlem döngüsü"""
     logger.info("Bot başlatılıyor...")
     
-    # Başlangıç kontrolü
     if not all([TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID]):
         logger.error("HATA: Telegram bilgileri eksik!")
         return
@@ -118,23 +107,16 @@ def main():
     try:
         driver = setup_driver()
         logger.info("Chrome başarıyla başlatıldı")
-        
         send_telegram_message("🤖 Bot başlatıldı")
         
         while True:
             for profile in PROFILES:
-                try:
-                    tweets = scrape_profile(driver, profile)
-                    if tweets:
-                        message = f"🐦 {profile} son tweetler:\n\n" + "\n\n".join(tweets)
-                        if send_telegram_message(message):
-                            logger.info(f"{profile} tweetleri gönderildi")
-                            
-                    time.sleep(REQUEST_DELAY)
-                    
-                except Exception as e:
-                    logger.error(f"{profile} işlenirken hata: {str(e)}")
-                    time.sleep(30)  # Hata durumunda bekle
+                tweets = scrape_profile(driver, profile)
+                if tweets:
+                    message = f"🐦 {profile} son tweetler:\n\n" + "\n\n".join(tweets)
+                    if send_telegram_message(message):
+                        logger.info(f"{profile} tweetleri gönderildi")
+                time.sleep(REQUEST_DELAY)
             
             logger.info(f"{CHECK_INTERVAL} saniye bekleniyor...")
             time.sleep(CHECK_INTERVAL)
